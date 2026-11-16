@@ -1,0 +1,133 @@
+import { chromium } from 'playwright';
+import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { createApp } from '../server/app.mjs';
+import { passwordHash, randomToken } from '../server/security.mjs';
+
+mkdirSync('artifacts', { recursive: true });
+const server = await createApp({ databasePath: ':memory:', adminHash: passwordHash('browser-test-only-password'), loginRateLimit: 30, writeRateLimit: 200 });
+await server.listen({ host: '127.0.0.1', port: 0 });
+const origin = `http://127.0.0.1:${server.server.address().port}`;
+const chromePath = process.env.CHROME_PATH || (process.platform === 'win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : undefined);
+let browser;
+const errors = [], checks = [];
+try {
+  browser = await chromium.launch({ ...(chromePath && existsSync(chromePath) ? { executablePath: chromePath } : {}), headless: true, args: ['--enable-unsafe-swiftshader'] });
+  const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
+  const page = await mobile.newPage();
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', msg => { if (msg.type() === 'error' && !msg.text().includes('404')) errors.push(msg.text()); });
+  await page.goto(origin); await page.waitForFunction(() => document.querySelector('canvas')?.width > 0);
+  await page.waitForTimeout(1600);
+  assert.equal(await page.locator('#scene-notice').isHidden(), true, 'WebGL scene should initialize');
+  await page.screenshot({ path: 'artifacts/01-mobile-empty.png' }); checks.push('Mobile WebGL initialized');
+  await page.getByRole('button', { name: '全部祝福', exact: true }).click();
+  await page.getByText('还没有祝福，来挂上第一颗祝福球吧。').waitFor();
+  await page.getByRole('button', { name: '关闭窗口' }).click();
+  await page.getByRole('button', { name: '留个祝福', exact: true }).click();
+  await page.getByLabel('昵称（选填）').fill('小满');
+  await page.getByLabel('祝福', { exact: true }).fill('愿你平安喜乐，所愿皆有回响。');
+  await page.screenshot({ path: 'artifacts/02-mobile-write.png', animations: 'disabled' });
+  await page.getByRole('button', { name: '挂上祝福', exact: true }).click();
+  await page.getByText('已挂上你的祝福', { exact: true }).waitFor();
+  let publicResponse = await (await page.request.get(`${origin}/api/blessings`)).json();
+  assert.equal(publicResponse.blessings.length, 1);
+  const created = publicResponse.blessings[0]; checks.push('Create blessing through UI');
+  await page.getByRole('button', { name: '全部祝福', exact: true }).click();
+  await page.getByRole('button', { name: '小满', exact: true }).click();
+  await page.getByRole('button', { name: '修改', exact: true }).waitFor();
+  await page.screenshot({ path: 'artifacts/03-mobile-own-detail.png', animations: 'disabled' });
+  await page.getByRole('button', { name: '修改', exact: true }).click();
+  await page.getByLabel('祝福', { exact: true }).fill('修改后的祝福：愿每个冬天都有温柔回响。');
+  await page.getByRole('button', { name: '保存修改', exact: true }).click();
+  await page.getByText('祝福已修改', { exact: true }).waitFor(); checks.push('Edit blessing through owner UI');
+  const other = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
+  const otherPage = await other.newPage(); otherPage.on('pageerror', error => errors.push(error.message));
+  await otherPage.goto(origin); await otherPage.getByRole('button', { name: '全部祝福', exact: true }).click();
+  await otherPage.getByRole('button', { name: '小满', exact: true }).click();
+  await otherPage.getByText('修改后的祝福：愿每个冬天都有温柔回响。', { exact: true }).waitFor();
+  assert.equal(await otherPage.getByRole('button', { name: '修改', exact: true }).count(), 0);
+  assert.equal(await otherPage.getByRole('button', { name: '删除', exact: true }).count(), 0); checks.push('Independent browser sees shared blessing but no owner controls');
+  await otherPage.getByRole('button', { name: '定位到树上', exact: true }).click();
+  assert.equal(await otherPage.locator('#overlay').isHidden(), true);
+  const result = await otherPage.request.patch(`${origin}/api/blessings/${created.id}`, { headers: { Origin: origin }, data: { message: 'unauthorized' } }); assert.equal(result.status(), 403);
+  await other.close();
+
+  // Real records in an isolated in-memory test database only, never production seed data.
+  for (let i = 0; i < 11; i++) {
+    await page.request.post(`${origin}/api/blessings`, { headers: { Origin: origin }, data: { nickname: ['阿宁','匿名访客','星野','林舟'][i % 4], message: '愿生活明亮，万事顺意。', requestId: randomUUID(), editToken: randomToken() } });
+  }
+  await page.reload(); await page.waitForTimeout(1300);
+  await page.screenshot({ path: 'artifacts/04-mobile-tree.png' });
+  const client = await mobile.newCDPSession(page);
+  await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{x: 135, y: 340, id: 0}, {x: 245, y: 340, id: 1}] });
+  for (let i = 0; i < 6; i++) await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{x: 135 - i * 9, y: 340, id: 0}, {x: 245 + i * 9, y: 340, id: 1}] });
+  await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await page.waitForTimeout(800); await page.screenshot({ path: 'artifacts/05-mobile-zoom.png' }); checks.push('Two-finger pinch dispatched');
+  await page.getByRole('button', { name: '全部祝福', exact: true }).click(); await page.getByRole('button', { name: '小满', exact: true }).click();
+  await page.getByRole('button', { name: '删除', exact: true }).click();
+  await page.screenshot({ path: 'artifacts/06-mobile-delete-confirm.png', animations: 'disabled' });
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await page.getByRole('button', { name: '定位到树上', exact: true }).click();
+  await page.waitForTimeout(900);
+  const desktop = await browser.newContext({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 });
+  const desktopPage = await desktop.newPage(); desktopPage.on('pageerror', error => errors.push(error.message));
+  await desktopPage.goto(origin); await desktopPage.waitForTimeout(1000); await desktopPage.screenshot({ path: 'artifacts/07-desktop-tree.png' });
+  await desktopPage.goto(`${origin}/admin`);
+  await desktopPage.getByLabel('密码', { exact: true }).fill('browser-test-only-password');
+  await desktopPage.getByRole('button', { name: '登录', exact: true }).click();
+  await desktopPage.getByRole('heading', { name: '祝福管理' }).waitFor();
+  await desktopPage.screenshot({ path: 'artifacts/08-admin.png' });
+  await desktopPage.getByRole('row').filter({ hasText: '小满' }).getByRole('button', { name: '删除', exact: true }).click();
+  await desktopPage.getByRole('dialog').getByRole('button', { name: '删除', exact: true }).click();
+  await desktopPage.getByText('共 11 条祝福', { exact: true }).waitFor(); checks.push('Admin login and confirmed deletion');
+  await desktopPage.getByRole('button', { name: '退出登录', exact: true }).click();
+  await desktopPage.getByRole('heading', { name: '管理员登录' }).waitFor(); checks.push('Admin logout');
+  await page.reload();
+  await page.getByRole('button', { name: '留个祝福', exact: true }).click();
+  await page.getByLabel('昵称（选填）').fill('可删除的自己');
+  await page.getByLabel('祝福', { exact: true }).fill('测试自己的删除功能');
+  await page.getByRole('button', { name: '挂上祝福', exact: true }).click();
+  await page.getByText('已挂上你的祝福', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '全部祝福', exact: true }).click();
+  await page.getByRole('button', { name: '可删除的自己', exact: true }).click();
+  await page.getByRole('button', { name: '删除', exact: true }).click();
+  await page.getByRole('button', { name: '删除', exact: true }).click();
+  await page.getByText('祝福已删除', { exact: true }).waitFor(); checks.push('Visitor confirmed deletion through owner UI');
+  for (let i = 0; i < 54; i++) {
+    const response = await page.request.post(`${origin}/api/blessings`, { headers: { Origin: origin }, data: { nickname: `星光${i + 1}`, message: i === 0 ? '<img src=x onerror=alert(1)>' : '愿你所遇皆温柔。', requestId: randomUUID(), editToken: randomToken() } });
+    assert.equal(response.status(), 201);
+  }
+  publicResponse = await (await page.request.get(`${origin}/api/blessings`)).json();
+  assert.equal(publicResponse.blessings.length, 65);
+  await page.reload(); await page.waitForTimeout(800);
+  await page.screenshot({ path: 'artifacts/09-mobile-many-blessings.png' });
+  await page.getByRole('button', { name: '全部祝福', exact: true }).click();
+  assert.equal(await page.locator('.blessing-row').count(), 65);
+  await page.screenshot({ path: 'artifacts/10-mobile-list.png', animations: 'disabled' });
+  const oldestNickname = publicResponse.blessings.at(-1).nickname;
+  await page.getByRole('button', { name: oldestNickname, exact: true }).last().click();
+  await page.getByRole('button', { name: '定位到树上', exact: true }).click();
+  await page.waitForTimeout(600);
+  assert.equal(await page.locator('#overlay').isHidden(), true); checks.push('65 records: list complete and hidden-batch positioning succeeds');
+  await page.getByRole('button', { name: '全部祝福', exact: true }).click();
+  await page.getByRole('button', { name: '星光1', exact: true }).click();
+  await page.getByText('<img src=x onerror=alert(1)>', { exact: true }).waitFor();
+  assert.equal(await page.locator('#sheet img').count(), 0); checks.push('Untrusted markup rendered as plaintext');
+  await page.getByRole('button', { name: '关闭窗口' }).click();
+  // A three-second rAF sample is only diagnostic: software rendering is not phone FPS.
+  const performanceSample = await page.evaluate(() => new Promise(resolve => {
+    const start = performance.now(); let frames = 0;
+    const tick = now => { frames++; if (now - start >= 3000) resolve({ frames, seconds: (now - start) / 1000 }); else requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  }));
+  writeFileSync('artifacts/render-sample.json', JSON.stringify(performanceSample, null, 2));
+  assert.deepEqual(errors, [], 'No browser exceptions or rendering errors');
+  const bounds = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth })); assert.equal(bounds.width, bounds.scroll);
+  checks.push('No horizontal overflow at mobile width');
+  console.log(checks.map(value => `PASS ${value}`).join('\n'));
+} finally {
+  writeFileSync('artifacts/browser-check.json', JSON.stringify({ checks, errors }, null, 2));
+  if (browser) await browser.close(); await server.close();
+}

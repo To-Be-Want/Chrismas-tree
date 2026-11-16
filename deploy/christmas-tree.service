@@ -1,0 +1,23 @@
+[Unit]
+Description=Christmas tree wishes API
+After=network.target
+
+[Service]
+Type=simple
+User=christmas
+Group=christmas
+WorkingDirectory=/srv/christmas-tree
+EnvironmentFile=/srv/christmas-tree/.env
+# Adjust this absolute path to the installed Node 24.16+ binary.
+ExecStart=/usr/bin/node server/index.mjs
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/christmas-tree/data
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
