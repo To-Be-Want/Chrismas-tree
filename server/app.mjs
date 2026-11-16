@@ -8,7 +8,7 @@ import { mkdirSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { digest, randomToken, validateBlessing, verifyPassword } from './security.mjs';
 
-const PUBLIC_COLUMNS = 'id, nickname, message, created_at, updated_at, ornament_seed';
+const PUBLIC_COLUMNS = 'id, nickname, message, created_at, updated_at, ornament_seed, ornament_style';
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 export async function createApp(options = {}) {
@@ -26,6 +26,7 @@ export async function createApp(options = {}) {
     CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
     INSERT OR IGNORE INTO metadata VALUES ('revision', 0);`);
+  if (!db.prepare('PRAGMA table_info(blessings)').all().some(c => c.name === 'ornament_style')) db.exec("ALTER TABLE blessings ADD COLUMN ornament_style TEXT NOT NULL DEFAULT 'jewel'");
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 8192,
     trustProxy: options.trustProxy ?? (process.env.TRUST_PROXY === 'true'),
     logController: new LogController({ disableRequestLogging: true }) });
@@ -86,7 +87,7 @@ export async function createApp(options = {}) {
     const id = randomUUID(), now = new Date().toISOString();
     db.exec('BEGIN IMMEDIATE');
     try {
-      db.prepare('INSERT INTO blessings VALUES (?,?,?,?,?,?,?,?)').run(id, result.nickname, result.message, now, now, randomInt(1, 2147483647), digest(editToken), requestId);
+      db.prepare('INSERT INTO blessings (id,nickname,message,created_at,updated_at,ornament_seed,edit_token_hash,request_id,ornament_style) VALUES (?,?,?,?,?,?,?,?,?)').run(id, result.nickname, result.message, now, now, randomInt(1, 2147483647), digest(editToken), requestId, result.ornament_style);
       bump(); db.exec('COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }
     return reply.code(201).send({ blessing: get(id), revision: revision() });
@@ -97,7 +98,7 @@ export async function createApp(options = {}) {
     if (result.error) return reply.code(400).send({ message: result.error });
     db.exec('BEGIN IMMEDIATE');
     try {
-      db.prepare('UPDATE blessings SET nickname=?, message=?, updated_at=? WHERE id=?').run(result.nickname, result.message, new Date().toISOString(), req.params.id);
+      db.prepare('UPDATE blessings SET nickname=?, message=?, updated_at=?, ornament_style=? WHERE id=?').run(result.nickname, result.message, new Date().toISOString(), req.body.ornament_style === undefined ? get(req.params.id).ornament_style : result.ornament_style, req.params.id);
       bump(); db.exec('COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }
     return { blessing: get(req.params.id), revision: revision() };

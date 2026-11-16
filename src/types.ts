@@ -5,5 +5,6 @@ export interface Blessing {
   created_at: string;
   updated_at: string;
   ornament_seed: number;
+  ornament_style: string;
 }
 export interface BlessingResponse { blessings?: Blessing[]; revision: number; unchanged?: boolean }

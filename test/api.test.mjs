@@ -101,3 +101,22 @@ test('built page, admin fallback, asset caching and byte-range audio serving', a
     for (const path of ['/not-a-page', '/.env', '/server/app.mjs']) assert.equal((await app.inject(path)).statusCode, 404);
   } finally { if (app) await app.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('ornament styles are validated, shared and editable without changing position', async t => {
+  const app = await createApp({ databasePath: ':memory:' }); t.after(() => app.close());
+  for (const style of ['jewel', 'star', 'snowflake', 'heart']) {
+    const body = { ...payload(), ornament_style: style };
+    const response = await app.inject({ method: 'POST', url: '/api/blessings', headers, payload: body });
+    assert.equal(response.statusCode, 201);
+    const row = response.json().blessing; assert.equal(row.ornament_style, style);
+    const editHeaders = { ...headers, 'x-edit-token': body.editToken };
+    const unchanged = await app.inject({ method:'PATCH', url:`/api/blessings/${row.id}`, headers:editHeaders, payload:{message:'edited'} });
+    assert.equal(unchanged.json().blessing.ornament_style, style);
+    const changed = await app.inject({ method:'PATCH', url:`/api/blessings/${row.id}`, headers:editHeaders, payload:{message:'edited',ornament_style:'heart'} });
+    assert.equal(changed.json().blessing.ornament_style,'heart');
+    assert.equal(changed.json().blessing.ornament_seed,row.ornament_seed);
+  }
+  const invalid = await app.inject({method:'POST',url:'/api/blessings',headers,payload:{...payload(),ornament_style:'invalid'}});
+  assert.equal(invalid.statusCode,400);
+  assert.equal((await app.inject('/api/blessings')).json().blessings.length,4);
+});

@@ -1,3 +1,5 @@
+import { ornamentDesigns } from './ornaments';
+import { ornamentPreview } from './ornament-preview';
 import './style.css';
 import { TreeScene } from './scene';
 import { api, button, el, icon } from './ui';
@@ -11,13 +13,13 @@ if (/^\/admin\/?$/.test(location.pathname)) {
 }
 
 function mountTree() {
-  app.innerHTML = `<div id="world" class="world"><canvas id="universe" aria-label="粉白粒子圣诞树，单指旋转，双指缩放，点击白色祝福球查看祝福"></canvas>
+  app.innerHTML = `<div id="world" class="world"><canvas id="universe" aria-label="粉白粒子圣诞树，横拖旋转，竖拖移动，双指缩放和平移，点击装饰物查看祝福"></canvas>
     <button id="sound" class="icon-button sound-button" aria-label="播放音乐">${icon('mute')}</button>
     <div id="scene-notice" class="scene-notice" hidden></div>
-    <div class="bottom-ui"><p id="gesture-hint" class="gesture-hint">单指旋转 <span>·</span> 双指缩放</p>
+    <div class="bottom-ui"><p id="gesture-hint" class="gesture-hint">横拖旋转 · 竖拖移动 <span>·</span> 双指缩放/平移</p>
     <p id="connection" class="connection" aria-live="polite"></p><nav class="scene-actions" aria-label="祝福操作">
-    <button id="write" class="scene-action">${icon('write')}<span>留个祝福</span></button><span class="action-divider"></span>
-    <button id="all" class="scene-action">${icon('list')}<span>全部祝福</span></button></nav></div></div>
+    <button id="write" class="scene-action">${icon('write')}<span>留下一句悄悄话</span></button><span class="action-divider"></span>
+    <button id="all" class="scene-action">${icon('list')}<span>其他人的悄悄话</span></button></nav></div></div>
     <div id="overlay" class="overlay" hidden><div class="sheet-backdrop"></div><section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1"></section></div>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>`;
   const world = app.querySelector<HTMLElement>('#world')!;
@@ -29,7 +31,7 @@ function mountTree() {
   let tree: TreeScene | null = null;
   let records: Blessing[] = [], revision = -1, fetching = false, loaded = false, busy = false, syncFailed = false;
   let view: 'list' | 'detail' | 'form' | 'delete' | null = null, selectedId = '', fromList = false;
-  let draft = { nickname: '', message: '' }, editingId = '';
+  let draft = { nickname: '', message: '', ornament_style: 'jewel' }, editingId = '';
   let returnFocus: HTMLElement | null = null, toastTimer = 0;
   const TOKEN_KEY = 'star-wishes:owners:v1';
   const PENDING_KEY = 'star-wishes:pending:v1';
@@ -49,11 +51,13 @@ function mountTree() {
   function openSheet() {
     if (overlay.hidden) returnFocus = document.activeElement as HTMLElement;
     overlay.hidden = false; world.inert = true;
+    overlay.classList.toggle('wish-overlay', view === 'detail' || view === 'list' || view === 'form');
     requestAnimationFrame(() => sheet.focus());
   }
   function closeSheet() {
     if (busy) return;
     overlay.hidden = true; world.inert = false; view = null;
+    tree?.setWishOpen(false);
     returnFocus?.focus();
   }
   overlay.querySelector('.sheet-backdrop')!.addEventListener('click', closeSheet);
@@ -66,9 +70,11 @@ function mountTree() {
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   });
   function header(title: string, back?: () => void) {
+    overlay.classList.toggle('wish-overlay', view === 'detail' || view === 'list' || view === 'form');
+    tree?.setWishOpen(view === 'detail');
     sheet.replaceChildren();
     const head = el('header', 'sheet-head');
-    if (back) { const b = button('返回', back, 'icon-button', 'back'); b.setAttribute('aria-label', '返回全部祝福'); head.append(b); }
+    if (back) { const b = button('返回', back, 'icon-button', 'back'); b.setAttribute('aria-label', '返回其他人的悄悄话'); head.append(b); }
     const h = el('h1', '', title); h.id = 'sheet-title'; head.append(h);
     const close = button('关闭', closeSheet, 'icon-button', 'close'); close.setAttribute('aria-label', '关闭窗口'); close.disabled = busy; head.append(close); sheet.append(head);
     return sheet;
@@ -76,7 +82,7 @@ function mountTree() {
   function errorLine(message: string, parent: HTMLElement) { const line = el('p', 'form-error', message); line.setAttribute('role', 'alert'); parent.append(line); return line; }
   function openList() { view = 'list'; openSheet(); renderList(); void refresh(); }
   function renderList() {
-    const body = header('全部祝福'), list = el('div', 'blessing-list');
+    const body = header('其他人的悄悄话'), list = el('div', 'blessing-list');
     if (!loaded) list.append(el('p', 'empty-state', syncFailed ? '暂时无法读取祝福，请检查网络后重试。' : '正在寻找星光里的祝福…'));
     else if (!records.length) list.append(el('p', 'empty-state', '还没有祝福，来挂上第一颗祝福球吧。'));
     for (const row of records) {
@@ -87,7 +93,7 @@ function mountTree() {
     if (!loaded) body.append(button('重新加载', () => void refresh(), 'text-button retry-button', 'retry'));
   }
   function openDetail(id: string, from: boolean) {
-    selectedId = id; fromList = from; view = 'detail'; openSheet(); renderDetail();
+    selectedId = id; fromList = from; view = 'detail'; tree?.resetView(); openSheet(); renderDetail();
   }
   function renderDetail() {
     const row = records.find(record => record.id === selectedId);
@@ -101,11 +107,11 @@ function mountTree() {
     actions.append(button('定位到树上', () => { closeSheet(); tree?.focus(row.id); }, 'text-button locate-button', 'locate')); body.append(actions);
   }
   function openForm(record?: Blessing) {
-    editingId = record?.id || ''; draft = { nickname: record?.nickname || '', message: record?.message || '' };
+    editingId = record?.id || ''; draft = { nickname: record?.nickname || '', message: record?.message || '', ornament_style: record?.ornament_style || 'jewel' };
     view = 'form'; openSheet(); renderForm();
   }
   function renderForm() {
-    const body = header(editingId ? '修改祝福' : '留个祝福'), form = el('form', 'blessing-form');
+    const body = header(editingId ? '修改祝福' : '留下一句悄悄话'), form = el('form', 'blessing-form');
     const nicknameLabel = el('label', 'field-label', '昵称（选填）'); nicknameLabel.htmlFor = 'nickname';
     const nickname = el('input', 'line-input'); nickname.id = 'nickname'; nickname.name = 'nickname'; nickname.value = draft.nickname;
     nickname.maxLength = 40; nickname.setAttribute('autocomplete', 'nickname'); nickname.placeholder = '匿名访客';
@@ -118,7 +124,20 @@ function mountTree() {
     const submit = el('button', 'text-button submit-button', editingId ? '保存修改' : '挂上祝福'); submit.type = 'submit';
     nickname.addEventListener('input', () => { draft.nickname = nickname.value; });
     message.addEventListener('input', () => { draft.message = message.value; const length = [...message.value].length; counter.textContent = `${length}/200`; counter.classList.toggle('over-limit', length > 200); });
-    form.append(nicknameLabel, nickname, messageLabel, message, counter, notice, errors, submit);
+    const picker = el('fieldset', 'ornament-picker');
+    picker.append(el('legend', 'field-label', '快来帮小tree tree变美吧'));
+    const detail = el('img', 'ornament-detail'); detail.src = ornamentPreview(draft.ornament_style); detail.alt = '所选装饰的实际3D模型近景';
+    const options = el('div', 'ornament-options');
+    for (const [value, name] of ornamentDesigns) {
+      const label = el('label', 'ornament-option'), input = el('input');
+      input.type = 'radio'; input.name = 'ornament_style'; input.value = value; input.checked = draft.ornament_style === value;
+      input.addEventListener('change', () => { draft.ornament_style = value; detail.src = ornamentPreview(value); });
+      const card = el('span', 'ornament-card');
+      const image = el('img'); image.alt = ''; image.src = ornamentPreview(value); card.append(image);
+      card.append(el('span', '', name)); label.append(input, card); options.append(label);
+    }
+    picker.append(options, detail, el('p', 'ornament-preview-note', '装饰细节 · 与树上使用同一款模型'));
+    form.append(picker, nicknameLabel, nickname, messageLabel, message, counter, notice, errors, submit);
     form.addEventListener('submit', async event => {
       event.preventDefault(); if (busy) return; errors.replaceChildren();
       if ([...draft.nickname.trim()].length > 20) { errorLine('昵称最多20字', errors); nickname.focus(); return; }

@@ -26,6 +26,8 @@ try {
   await page.getByText('还没有祝福，来挂上第一颗祝福球吧。').waitFor();
   await page.getByRole('button', { name: '关闭窗口' }).click();
   await page.getByRole('button', { name: '留个祝福', exact: true }).click();
+  await page.getByRole('radio', { name: '冰晶雪花' }).check();
+  await page.screenshot({ path: 'artifacts/ornament-picker.png' });
   await page.getByLabel('昵称（选填）').fill('小满');
   await page.getByLabel('祝福', { exact: true }).fill('愿你平安喜乐，所愿皆有回响。');
   await page.screenshot({ path: 'artifacts/02-mobile-write.png', animations: 'disabled' });
@@ -33,10 +35,13 @@ try {
   await page.getByText('已挂上你的祝福', { exact: true }).waitFor();
   let publicResponse = await (await page.request.get(`${origin}/api/blessings`)).json();
   assert.equal(publicResponse.blessings.length, 1);
+  assert.equal(publicResponse.blessings[0].ornament_style, 'snowflake');
   const created = publicResponse.blessings[0]; checks.push('Create blessing through UI');
   await page.getByRole('button', { name: '全部祝福', exact: true }).click();
   await page.getByRole('button', { name: '小满', exact: true }).click();
   await page.getByRole('button', { name: '修改', exact: true }).waitFor();
+  await page.waitForTimeout(1200);
+  assert.equal(await page.locator('#overlay').evaluate(node => node.classList.contains('wish-overlay')), true);
   await page.screenshot({ path: 'artifacts/03-mobile-own-detail.png', animations: 'disabled' });
   await page.getByRole('button', { name: '修改', exact: true }).click();
   await page.getByLabel('祝福', { exact: true }).fill('修改后的祝福：愿每个冬天都有温柔回响。');

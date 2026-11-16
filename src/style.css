@@ -87,3 +87,38 @@ input::placeholder, textarea::placeholder { color: #696974; opacity: 1; }
 @media (min-width: 800px) { .sheet { margin-bottom: 28px; border-bottom: 1px solid #35353e; } .bottom-ui { bottom: 30px; } }
 @media (max-width: 580px) { .admin-page { padding: 28px 18px; } .admin-table th:nth-child(3), .admin-table td:nth-child(3) { display: none; } .mobile-date { display: block; } .admin-table th:nth-child(1) { width: 23%; } .admin-table th:nth-child(2) { width: 61%; } .admin-table th:nth-child(4) { width: 16%; } .admin-head { align-items: start; } .admin-tools { gap: 8px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+.ornament-picker{border:0;padding:0;margin:0 0 24px;min-width:0}
+.ornament-options{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.ornament-option{position:relative;cursor:pointer;min-width:0}
+.ornament-option input{position:absolute;opacity:0;width:100%;height:100%;margin:0}
+.ornament-card{display:flex;align-items:center;flex-direction:column;border:1px solid #40343f;border-radius:12px;padding:8px 2px 12px;background:linear-gradient(145deg,#251923,#101017);font-size:11px;color:#d9bdcd}
+.ornament-card svg{width:64px;max-width:100%;filter:drop-shadow(0 0 7px #e9a3c238)}
+.ornament-option input:checked + .ornament-card{border-color:#edbcd2;background:linear-gradient(145deg,#513044,#211923);color:#fff0f7}
+.ornament-option input:focus-visible + .ornament-card{outline:2px solid white;outline-offset:3px}
+.ornament-card { pointer-events: none; }
+
+.ornament-card img { width:64px; max-width:100%; }
+.ornament-detail { display:block; width:190px; height:190px; object-fit:contain; margin:8px auto 0; }
+.ornament-preview-note { text-align:center; font-size:11px; color:#b69aaa; margin:0; }
+
+/* Wish details and the full list share a glass surface above the live scene. */
+.wish-overlay { align-items: center; padding: 24px 18px; }
+.wish-overlay .sheet-backdrop { background: transparent; }
+.wish-overlay .sheet {
+  width: min(100%, 620px); max-height: min(72dvh, 620px); margin: 0;
+  padding: 20px 30px 22px; border: 1px solid rgb(255 211 228 / 58%);
+  border-radius: 24px; background: linear-gradient(135deg, rgb(48 31 39 / 30%), rgb(17 14 20 / 23%));
+  backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
+  box-shadow: 0 18px 70px rgb(0 0 0 / 20%), inset 0 1px 0 rgb(255 255 255 / 8%);
+  color: #fff0df;
+}
+.wish-overlay .sheet-head { margin-bottom: 16px; }
+.wish-overlay .sheet-head h1 { color: #f8e4db; }
+.wish-overlay .blessing-message { font-size: clamp(22px, 3vw, 32px); line-height: 1.85; text-align: center; color: #fff0df; margin: 26px 0 32px; text-shadow: 0 2px 16px rgb(0 0 0 / 65%); }
+.wish-overlay .detail-actions { border-top-color: rgb(255 215 228 / 32%); }
+.wish-overlay .text-button { color: #f6e4dc; }
+@media (max-width: 580px) {
+  .wish-overlay .sheet { padding: 14px 20px 16px; border-radius: 20px; }
+  .wish-overlay .blessing-message { font-size: 23px; margin: 22px 0 28px; }
+}
